@@ -3,6 +3,8 @@ import uuid
 import time
 from flask import Flask, render_template, request, jsonify
 import whisper
+from pydub import AudioSegment
+import subprocess
 
 # Initialize Flask app and Whisper model
 app = Flask(__name__)
@@ -11,14 +13,16 @@ model = whisper.load_model("base")
 # Directory to save uploaded files and transcriptions
 UPLOAD_FOLDER = 'uploads'
 TRANSCRIPTION_FOLDER = 'transcriptions'
+ARCHIVE_FOLDER = 'archives'
 MAX_FOLDER_SIZE_MB = 100  # Maximum folder size in MB
 VALID_EXTENSIONS = {'wav', 'mp3', 'm4a'}  # Allowed audio file extensions
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # Create folder for audio files
 os.makedirs(TRANSCRIPTION_FOLDER, exist_ok=True)  # Create folder for transcriptions
+os.makedirs(ARCHIVE_FOLDER, exist_ok=True)  
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['TRANSCRIPTION_FOLDER'] = TRANSCRIPTION_FOLDER
-
+app.config['ARCHIVE_FOLDER'] = ARCHIVE_FOLDER
 
 # Function to validate file extension
 def allowed_file(filename):
@@ -50,6 +54,21 @@ def cleanup_folder(folder, max_size_mb):
 def index():
     return render_template('index.html')
 
+def transcribe_audio_chunks(audio_path, model):
+    audio = AudioSegment.from_file(audio_path)
+    chunk_length_ms = 30000  # Split into 30-second chunks
+    chunks = [audio[i:i + chunk_length_ms] for i in range(0, len(audio), chunk_length_ms)]
+
+    transcription = ""
+    for i, chunk in enumerate(chunks):
+        chunk_path = f"temp_chunk_{i}.wav"
+        chunk.export(chunk_path, format="wav")
+        chunk_audio = whisper.load_audio(chunk_path)
+        chunk_audio = whisper.pad_or_trim(chunk_audio)
+        result = model.transcribe(chunk_audio, language='de') # Force German language
+        transcription += result['text'] + " "
+        os.remove(chunk_path)  # Clean up temporary files
+    return transcription.strip()
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
@@ -79,14 +98,27 @@ def transcribe_audio():
     audio = whisper.pad_or_trim(audio)
 
     # Transcribe the audio
-    result = model.transcribe(audio)
-    transcription = result['text']
+    result = model.transcribe(audio, language='de')  # Force German language
+    transcription = transcribe_audio_chunks(audio_path, model)
 
     # Save the transcription to a file
     transcription_filename = os.path.splitext(unique_filename)[0] + ".txt"
+    archive_filename = os.path.splitext(unique_filename)[0] + ".txt"
     transcription_path = os.path.join(app.config['TRANSCRIPTION_FOLDER'], transcription_filename)
     with open(transcription_path, 'w') as transcription_file:
         transcription_file.write(transcription)
+    archive_path = os.path.join(app.config['ARCHIVE_FOLDER'], archive_filename)
+    with open(archive_path, 'w') as archive_file:
+        archive_file.write(transcription)
+    
+    # Run another Python script
+    subprocess.run(["python", "rule-based-model.py", transcription_path], check=True)
+
+    #config pdf path to be serve
+    
+    pdf_filename = os.path.splitext(transcription_filename)[0] + ".pdf"
+    pdf_folder = os.path.join(os.getcwd(), "static", "gen-pdf-report")
+    os.makedirs(pdf_folder, exist_ok=True)
 
     # Clean up transcription folder if it exceeds the size limit
     cleanup_folder(app.config['TRANSCRIPTION_FOLDER'], MAX_FOLDER_SIZE_MB)
@@ -94,7 +126,8 @@ def transcribe_audio():
     return jsonify({
         'transcription': transcription,
         'audio_path': audio_path,
-        'transcription_path': transcription_path
+        'transcription_path': transcription_path,
+        'pdf_url': f"/static/gen-pdf-report/{pdf_filename}"
     })
 
 

@@ -1,81 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Audio Transcription</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      padding: 20px;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 16px;
-      margin-bottom: 10px;
-    }
-    #transcription {
-      margin-top: 20px;
-      border-top: 2px solid #ddd;
-      padding-top: 20px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Transcription</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        #transcription {
+            margin-top: 20px;
+            border-top: 2px solid #ddd;
+            padding-top: 20px;
+        }
+        #loading {
+            display: none;
+            font-size: 18px;
+            color: #007bff;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #007bff;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
 
-  <h1>Audio Transcription with Whisper</h1>
+    <h1>CONSTRUCTIFY</h1>
 
-  <button id="start-recording">Start Recording</button>
-  <button id="stop-recording" disabled>Stop Recording</button>
+    <!-- Audio File Upload Section -->
+    <h2>Upload an Audio File</h2>
+    <form id="upload-form" enctype="multipart/form-data">
+        <label for="audio-file">Choose an audio file:</label>
+        <input type="file" id="audio-file" name="audio" accept=".wav,.mp3,.m4a" required>
+        <button type="submit">Upload and Transcribe</button>
+    </form>
 
-  <div id="transcription"></div>
+    <br><br>
 
-  <script>
-    let mediaRecorder;
-    let audioChunks = [];
+    <!-- Live Audio Recording Section -->
+    <h2>Record Audio</h2>
+    <button id="start-recording">Start Recording</button>
+    <button id="stop-recording" disabled>Stop Recording</button>
 
-    // Start recording audio
-    document.getElementById("start-recording").onclick = async function () {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream);
+    <!-- Loading Indicator -->
+    <div id="loading">
+        <span class="spinner"></span> Processing, please wait...
+    </div>
 
-      mediaRecorder.ondataavailable = event => {
-        audioChunks.push(event.data);
-      };
+    <!-- Transcription Display -->
+    <div id="transcription"></div>
 
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
-        audio.play();
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
 
-        // Send the audio file to the backend for transcription
-        const formData = new FormData();
-        formData.append("audio", audioBlob, "audio.wav");
+        // Show loading spinner
+        function showLoading() {
+            document.getElementById("loading").style.display = "block";
+        }
 
-        fetch('/transcribe', {
-          method: 'POST',
-          body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-          document.getElementById("transcription").innerHTML = `<h3>Transcription:</h3><p>${data.transcription}</p>`;
-        })
-        .catch(error => console.error("Error transcribing audio:", error));
-      };
+        // Hide loading spinner
+        function hideLoading() {
+            document.getElementById("loading").style.display = "none";
+        }
 
-      mediaRecorder.start();
-      document.getElementById("start-recording").disabled = true;
-      document.getElementById("stop-recording").disabled = false;
-    };
+        // Start recording audio
+        document.getElementById("start-recording").onclick = async function () {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
 
-    // Stop recording audio
-    document.getElementById("stop-recording").onclick = function () {
-      mediaRecorder.stop();
-      document.getElementById("start-recording").disabled = false;
-      document.getElementById("stop-recording").disabled = true;
-    };
-  </script>
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const formData = new FormData();
+                formData.append("audio", audioBlob, "audio.wav");
+
+                showLoading();
+                fetch('/transcribe', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("transcription").innerHTML = `<h3>Transcription:</h3><p>${data.transcription}</p><a href="${data.pdf_url}" target="_blank">Open PDF in New Tab`;
+                })
+                .catch(error => console.error("Error transcribing audio:", error))
+                .finally(() => hideLoading());
+            };
+
+            mediaRecorder.start();
+            document.getElementById("start-recording").disabled = true;
+            document.getElementById("stop-recording").disabled = false;
+        };
+
+        // Stop recording audio
+        document.getElementById("stop-recording").onclick = function () {
+            mediaRecorder.stop();
+            document.getElementById("start-recording").disabled = false;
+            document.getElementById("stop-recording").disabled = true;
+        };
+
+        // Handle audio file upload form submission
+        document.getElementById("upload-form").onsubmit = function(event) {
+            event.preventDefault(); // Prevent the form from submitting normally
+            const formData = new FormData(this);
+
+            showLoading();
+            fetch('/transcribe', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("transcription").innerHTML = `<h3>Transcription:</h3><p>${data.transcription}</p><a href="${data.pdf_url}" target="_blank">Open PDF in New Tab`;
+            })
+            .catch(error => console.error("Error uploading audio file:", error))
+            .finally(() => hideLoading());
+        };
+    </script>
 
 </body>
 </html>
